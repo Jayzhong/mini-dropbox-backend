@@ -1,5 +1,5 @@
 from fastapi import FastAPI
-from src.interfaces.api.v1.routers import system
+from src.interfaces.api.v1.routers import system, auth
 
 app = FastAPI(
     title="Mini Dropbox Backend",
@@ -11,6 +11,7 @@ app = FastAPI(
 
 # Include Routers
 app.include_router(system.router, prefix="/api/v1/system", tags=["System"])
+app.include_router(auth.router, prefix="/api/v1/auth", tags=["Authentication"])
 
 @app.get("/")
 async def root():
