@@ -1,4 +1,4 @@
-from typing import Protocol, Optional
+from typing import Protocol, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime
 from src.domain.user.entity import User
@@ -31,4 +31,11 @@ class PasswordHasher(Protocol):
         ...
 
     async def verify(self, password: str, hashed_password: str) -> bool:
+        ...
+
+class TokenService(Protocol):
+    """
+    Abstract interface for Token generation and validation.
+    """
+    def create_access_token(self, data: Dict[str, Any]) -> str:
         ...

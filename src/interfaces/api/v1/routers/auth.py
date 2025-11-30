@@ -1,11 +1,16 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from src.application.user.use_cases import RegisterUserUseCase
-from src.application.user.dto import UserOutputDTO
-from src.domain.user.exceptions import UserAlreadyExistsError
-from src.interfaces.api.dependencies import get_register_user_use_case
-from src.interfaces.schemas.user import RegisterUserRequest, UserResponse
+from src.application.user.use_cases import RegisterUserUseCase, LoginUserUseCase
+from src.application.user.dto import UserOutputDTO, TokenOutputDTO
+from src.domain.user.exceptions import UserAlreadyExistsError, InvalidCredentialsError
+from src.interfaces.api.dependencies import get_register_user_use_case, get_login_user_use_case
+from src.interfaces.schemas.user import RegisterUserRequest, UserResponse, LoginRequest, TokenResponse
+import logging # Added for logging
 
 router = APIRouter()
+
+# Setup basic logging for debugging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @router.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 async def register_user(
@@ -29,8 +34,35 @@ async def register_user(
             detail="User with this email already exists."
         )
     except Exception as e:
-        # Generic error handler, specific domain errors should be caught above
+        logger.exception("Error during user registration:") # Log the full traceback
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"An unexpected error occurred: {e}"
+            detail=f"An unexpected error occurred: {e.__class__.__name__} - {e}"
+        )
+
+@router.post("/login", response_model=TokenResponse)
+async def login_user(
+    request: LoginRequest,
+    use_case: LoginUserUseCase = Depends(get_login_user_use_case)
+):
+    """
+    Authenticates a user and returns an access token.
+    """
+    try:
+        token_output_dto: TokenOutputDTO = await use_case.execute(request)
+        return TokenResponse(
+            access_token=token_output_dto.access_token,
+            token_type=token_output_dto.token_type
+        )
+    except InvalidCredentialsError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect email or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    except Exception as e:
+        logger.exception("Error during user login:") # Log the full traceback
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"An unexpected error occurred: {e.__class__.__name__} - {e}"
         )

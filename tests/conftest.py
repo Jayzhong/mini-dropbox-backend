@@ -2,43 +2,59 @@ import pytest
 import asyncio
 from typing import AsyncGenerator, Generator
 from httpx import AsyncClient, ASGITransport
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker, AsyncEngine
+
 from src.infrastructure.config.settings import settings
 from src.interfaces.api.main import app
-from src.infrastructure.database.models.base import Base
+from src.infrastructure.database.main import get_db_session
 
-# Use the existing settings but ensure we point to the test/dev DB
-# For a real pipeline, we might override settings.DATABASE_URL here to point to a separate test DB.
 TEST_DATABASE_URL = settings.DATABASE_URL
-
-engine = create_async_engine(TEST_DATABASE_URL, future=True)
-TestingSessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 @pytest.fixture(scope="session")
 def event_loop() -> Generator:
-    """Create an instance of the default event loop for each test case."""
-    loop = asyncio.get_event_loop_policy().new_event_loop()
+    # Use the default policy to create a new event loop for the session.
+    # This loop will be used by pytest-asyncio for all tests in this session.
+    policy = asyncio.get_event_loop_policy()
+    loop = policy.new_event_loop()
+    # Set the created loop as the current loop for the duration of the fixture.
+    # This ensures consistency for async operations that implicitly rely on get_event_loop().
+    policy.set_event_loop(loop)
     yield loop
     loop.close()
+    # Restore the default event loop policy after the session
+    policy.set_event_loop_policy(None)
+
 
 @pytest.fixture(scope="function")
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Fixture that provides an async session for DB operations within tests.
-    This can be used to inspect the DB state or clean up data.
-    """
-    async with TestingSessionLocal() as session:
-        yield session
-        # Optional: Rollback if we were using a transaction-per-test strategy
-        # But since the API commits, we might need manual cleanup or nested transactions.
-        await session.close()
+    # Create the engine and sessionmaker *within* the function scope
+    # to ensure they are tied to the current test's event loop.
+    engine = create_async_engine(TEST_DATABASE_URL, future=True, echo=True)
+    SessionLocal = async_sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+    # Establish a connection for the test function
+    async with engine.connect() as connection:
+        # Begin a transaction that is rolled back after each test
+        async with connection.begin() as transaction:
+            # Bind a session to this connection and transaction
+            async with SessionLocal(bind=connection) as session:
+                # Override the app's dependency to use this test session
+                app.dependency_overrides[get_db_session] = lambda: session
+                try:
+                    yield session
+                finally:
+                    # Rollback the transaction to clean up test data
+                    await transaction.rollback()
+                    # Clear overrides
+                    app.dependency_overrides.clear()
+    await engine.dispose() # Dispose engine resources after each test function
 
 @pytest.fixture(scope="function")
-async def async_client() -> AsyncGenerator[AsyncClient, None]:
+async def async_client(db_session: AsyncSession) -> AsyncGenerator[AsyncClient, None]: # db_session implicitly sets up overrides
     """
     Fixture that provides an httpx AsyncClient for the FastAPI app.
+    It implicitly uses the overridden db_session.
     """
-    # We use ASGITransport to test the app directly without spinning up a server port
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

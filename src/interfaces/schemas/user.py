@@ -9,6 +9,13 @@ class RegisterUserRequest(BaseModel):
     email: EmailStr
     password: str
 
+class LoginRequest(BaseModel):
+    """
+    Pydantic Schema for user login request body.
+    """
+    email: EmailStr
+    password: str
+
 class UserResponse(BaseModel):
     """
     Pydantic Schema for user response.
@@ -17,3 +24,10 @@ class UserResponse(BaseModel):
     email: EmailStr
     created_at: datetime
     updated_at: datetime
+
+class TokenResponse(BaseModel):
+    """
+    Pydantic Schema for JWT token response.
+    """
+    access_token: str
+    token_type: str
