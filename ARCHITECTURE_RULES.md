@@ -1,155 +1,182 @@
+# Coding Agent Guidelines: Python DDD & Clean Architecture
+
 ## 1. Project Overview & Philosophy
 
-This project implements a backend system similar to Dropbox using **Python 3.14+**, **FastAPI**, and **SQLAlchemy 2.0 (Async)**.
+This project implements a backend system similar to Dropbox using **Python 3.12+**, **FastAPI**, and **SQLAlchemy 2.0 (Async)**.
 
 The core architectural philosophy is **Domain-Driven Design (DDD)** combined with **Clean Architecture**. The primary goal is to decouple business logic from frameworks, databases, and external interfaces.
 
-**⚠️ IMPORTANT FOR AI ASSISTANT:** You must strictly adhere to the **Dependency Rule**: Source code dependencies can only point **inwards**. Nothing in an inner circle can know anything at all about something in an outer circle.
+**⚠️ CRITICAL INSTRUCTION:** You must strictly adhere to the **Dependency Rule**: Source code dependencies can only point **inwards**.
+- **Inner layers (Domain)** must NOT know about outer layers (Infra/API).
+- **Outer layers (Infra)** depend on interfaces defined in inner layers.
 
-## 2. Technical Stack Constraints
+## 2. Technical Stack & Tooling
 
 - **Language:** Python 3.12+
-    
+- **Dependency Manager:** `uv` (Use `uv add`, `uv run`)
 - **Web Framework:** FastAPI (Async)
-    
-- **ORM:** SQLAlchemy 2.0+ (Use `AsyncSession`, `Mapped[]` syntax, declarative base)
-    
-- **Validation:** Pydantic V2 (Strict mode preferred)
-    
-- **Database:** PostgreSQL
-    
-- **Dependency Injection:** FastAPI `Depends` mechanism
-    
+- **ORM:** SQLAlchemy 2.0+ (Async, `Mapped[]`, declarative base)
+- **Migrations:** Alembic (Async configuration)
+- **Validation:** Pydantic V2 (Strict mode)
+- **Database:** PostgreSQL (Async driver: `asyncpg`)
+- **Linter/Formatter:** Ruff
+- **Testing:** Pytest + Pytest-Asyncio
 
 ## 3. Directory Structure & Layer Responsibilities
 
-The project root is `src/`. You must strictly follow this 4-layer structure.
+The project root is `src/`. STRICTLY follow this structure. Note the placement of Repository Implementations in Infrastructure.
 
-Plaintext
-
-```
+```text
 src/
 ├── domain/                         # LAYER 1 (Innermost): Enterprise Logic
 │   ├── common/                     # Shared Value Objects, Base Entities
 │   ├── user/                       # Aggregate: User
 │   │   ├── entity.py               # Pure Python Data Classes
-│   │   ├── exceptions.py           # Business Exceptions
+│   │   ├── exceptions.py           # Domain Exceptions
 │   │   └── values.py               # Value Objects (e.g., UserID, Email)
 │   └── ...
 │
 ├── application/                    # LAYER 2: Application Logic / Use Cases
-│   ├── common/                     # Interfaces (UoW, common DTOs)
+│   ├── common/                     # Interfaces (UoW Protocol, DTO base)
+│   │   ├── interfaces.py           # Abstract Repo Definitions defined here or in domain
 │   ├── user/
-│   │   ├── dto.py                  # Data Transfer Objects (Pure Python dataclasses)
+│   │   ├── dto.py                  # Input/Output DTOs (Pure dataclasses)
 │   │   └── use_cases.py            # Application Services / Interactors
 │   └── ...
 │
-├── interfaces/                     # LAYER 3: Interface Adapters
+├── interfaces/                     # LAYER 3: Interface Adapters (Entry Points)
 │   ├── api/                        # Driving Adapters (Web)
 │   │   ├── v1/
 │   │   │   ├── routers/            # FastAPI Routes
-│   │   │   └── schemas/            # Pydantic Models (Request/Response)
-│   │   └── dependencies.py         # DI wiring
-│   └── repositories/               # Driven Adapters (Data Access)
-│       ├── abstracts/              # Abstract Base Classes / Protocols
-│       └── impl/                   # Concrete SQLAlchemy Implementations
+│   │   │   └── schemas/            # Pydantic Models (HTTP Request/Response)
+│   │   └── dependencies.py         # DI wiring (Entry point for composition)
 │
 └── infrastructure/                 # LAYER 4 (Outermost): Frameworks & Drivers
-    ├── config/                     # Environment variables
+    ├── config/                     # Settings (pydantic-settings)
     ├── database/
-    │   ├── main.py                 # Engine & Session setup
+    │   ├── main.py                 # Async Engine & Session Factory
+    │   ├── migrations/             # Alembic versions
     │   └── models/                 # SQLAlchemy ORM Models
-    └── storage/                    # S3, Redis implementations
+    ├── repositories/               # Driven Adapters (Implementation)
+    │   └── user.py                 # SQLAlchemy implementation of UserRepository
+    └── services/                   # External services (S3, Email, Redis)
 ```
-
----
 
 ## 4. Strict Development Rules
 
 ### Rule #1: The "No Frameworks in Domain" Rule
 
-- **Domain Layer (`src/domain`)**: Must NOT import `fastapi`, `sqlalchemy`, or `pydantic`.
+- **Domain Layer (`src/domain`)**: Must NOT import `fastapi`, `sqlalchemy`, `pydantic`, or `alembic`.
     
 - It should contain only standard Python libraries.
     
-- **Reason**: The core business logic must survive framework changes.
+- **Reason**: The core business logic must remain pure and testable without external IO.
     
 
 ### Rule #2: Entity vs. Model Separation
 
 - **Entities (`domain`)**: Pure Python `dataclasses` defining business behavior and state.
     
-- **Models (`infrastructure`)**: SQLAlchemy classes defining database tables.
+- **Models (`infrastructure`)**: SQLAlchemy classes (`Base`) defining database tables.
     
-- **The Mapping**: You must write explicit mapper methods in the **Repository Implementation** layer (`src/interfaces/repositories/impl`) to convert `Model -> Entity` (when reading) and `Entity -> Model` (when saving).
+- **The Mapping**: You must write explicit mappers in the **Infrastructure Repository** to convert:
     
+    - `Model -> Entity` (when reading from DB)
+        
+    - `Entity -> Model` (when saving to DB)
+        
 - **Forbidden**: Never pass an SQLAlchemy Model to the Use Case or API layer.
     
 
 ### Rule #3: Pydantic Isolation
 
-- **Pydantic Models (`BaseModel`)**: allowed **ONLY** in `src/interfaces/api/schemas`.
+- **Pydantic Models**: Allowed **ONLY** in `src/interfaces/api/schemas` (for HTTP validation) or `src/infrastructure/config` (for settings).
     
-- **DTOs**: The Application layer (`src/application`) must use standard Python `@dataclass` for data transfer, not Pydantic models.
+- **Application DTOs**: The Application layer must use standard Python `@dataclass`.
     
-- **Reason**: Pydantic is an I/O validation tool, not a business modeling tool.
-    
-
-### Rule #4: Dependency Injection
-
-- All dependencies (Repositories, Services, Unit of Work) must be defined as abstracts (Protocols) in `src/interfaces/repositories/abstracts` or `src/application`.
-    
-- Implementations are injected at runtime using FastAPI's `Depends` in `src/interfaces/api/dependencies.py`.
-    
-- **Do not** instantiate concrete repositories directly inside Use Cases.
+- **Reason**: Pydantic is an I/O boundary tool. Domain logic should not depend on validation libraries.
     
 
-### Rule #5: Asynchronous First
+### Rule #4: Dependency Injection & Inversion
 
-- All I/O bound operations (Database, API calls, File Ops) must be `async`.
+- **Abstracts**: Define Repository/Service interfaces (Protocols/ABCs) in `src/application` or `src/domain`.
     
-- Use `await session.execute()` style for SQLAlchemy 2.0.
+- **Concretions**: Implement them in `src/infrastructure`.
+    
+- **Wiring**: Use FastAPI `Depends` in `src/interfaces/api/dependencies.py` to inject implementations into Use Cases.
+    
+- **Forbidden**: Do not instantiate `SQLAlchemyUserRepository` directly inside a Use Case.
     
 
----
+### Rule #5: Database & Transaction Management
 
-## 5. Naming Conventions & Code Style
+- **Async Only**: Use `AsyncSession` and `select()`, `insert()`, `update()`, `delete()` syntax.
+    
+- **Unit of Work (UoW)**: Implement a UoW pattern to manage transactions.
+    
+    - Commits should happen in the **Application Layer** (Use Case) via UoW, NOT in the Repository.
+        
+    - Repositories should only `add`, `flush`, or `execute`.
+        
 
-To avoid confusion between layers, adhere to these naming suffixes:
+## 5. Database Management (Alembic)
+
+- **Configuration**: Use `alembic` with an **async** `env.py` configuration (using `run_migrations_online` with `connectable`).
+    
+- **Workflow**:
+    
+    1. Modify `infrastructure/database/models/*.py`.
+        
+    2. Ensure all models are imported in `infrastructure/database/main.py` or Alembic's `env.py` (target metadata).
+        
+    3. Run: `uv run alembic revision --autogenerate -m "describe_change"`.
+        
+    4. Run: `uv run alembic upgrade head`.
+        
+- **Naming**: Migration files must use the format `{revision_id}_{slug}.py`.
+    
+- **Constraint**: DO NOT use `create_all()`. All schema changes must go through Alembic.
+    
+
+## 6. Naming Conventions
 
 |**Concept**|**Suffix/Style**|**Example**|**Location**|
 |---|---|---|---|
-|**Domain Entity**|No suffix / PascalCase|`User`|`src/domain/user/entity.py`|
+|**Domain Entity**|PascalCase|`User`|`src/domain/user/entity.py`|
 |**DB Model**|`Model` suffix|`UserModel`|`src/infra/database/models/user.py`|
 |**Pydantic Schema**|`Request`/`Response`|`CreateUserRequest`|`src/interfaces/api/schemas/`|
 |**App DTO**|`DTO` suffix|`CreateUserInputDTO`|`src/application/user/dto.py`|
-|**Repository Interface**|`Repository`|`UserRepository`|`src/interfaces/repos/abstracts/`|
-|**Repository Impl**|`SQLAlchemy...`|`SQLAlchemyUserRepository`|`src/interfaces/repos/impl/`|
+|**Repo Interface**|`Repository`|`UserRepository` (Protocol)|`src/application/common/interfaces/`|
+|**Repo Impl**|`SqlAlchemy...`|`SqlAlchemyUserRepository`|`src/infrastructure/repositories/`|
 
-## 6. Error Handling Strategy
+## 7. Error Handling Strategy
 
 1. **Domain Layer**: Raise pure Python custom exceptions (e.g., `UserNotFound`, `InsufficientFunds`).
     
-2. **Application Layer**: Let exceptions bubble up or catch and re-raise as App-specific exceptions.
+2. **Application Layer**: Catch technical errors, wrap in App exceptions if needed, or let Domain exceptions bubble up.
     
-3. **Interface Layer (API)**: Use a global `exception_handler` in FastAPI main config to catch Domain Exceptions and translate them into HTTP 4xx/5xx responses. Do not return HTTP responses directly from Use Cases.
+3. **Interface Layer (API)**: Use a global `exception_handler` in `src/interfaces/api/main.py`.
+    
+    - Map `UserNotFound` (Domain) -> HTTP 404.
+        
+    - Map `PermissionError` (Domain) -> HTTP 403.
+        
+    - **Never** return HTTP responses (JSONResponse) directly from Use Cases.
+        
 
-### 1.3 Tooling & Dependency Management
+## 8. Development Workflow (UV & Ruff)
 
-- The project uses **uv** as the dependency and environment manager.
-
-- AI assistants and developers MUST:
-
-  - Prefer `uv` commands over `pip`, `pipenv`, or `poetry`.
-
-  - When suggesting install/run commands, use:
-
-    - `uv add ...` for dependencies
-
-    - `uv run ...` for running scripts and servers
-
-- Example (non-normative):
-
-  - `uv add fastapi uvicorn[standard] sqlalchemy psycopg[binary]`
-
-  - `uv run uvicorn src.interfaces.api.app:app --reload`
+- **Dependencies**:
+    
+    - `uv add fastapi uvicorn[standard] sqlalchemy asyncpg pydantic-settings alembic`
+        
+    - `uv add --dev ruff pytest pytest-asyncio`
+        
+- **Linting**: Run `uv run ruff check .` before committing.
+    
+- **Testing Strategy**:
+    
+    - **Unit Tests**: Test Domain Entities and Use Cases using mocks. No DB access.
+        
+    - **Integration Tests**: Test Infrastructure Repositories using a real test DB (spin up via Docker).
+        
