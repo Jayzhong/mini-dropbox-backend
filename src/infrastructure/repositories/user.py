@@ -32,6 +32,14 @@ class SqlAlchemyUserRepository(UserRepository):
             updated_at=entity.updated_at
         )
 
+    async def get_by_id(self, user_id: UUID) -> Optional[User]:
+        stmt = select(UserModel).where(UserModel.id == user_id)
+        result = await self.session.execute(stmt)
+        model = result.scalar_one_or_none()
+        if model:
+            return self._to_entity(model)
+        return None
+
     async def get_by_email(self, email: str) -> Optional[User]:
         stmt = select(UserModel).where(UserModel.email == email)
         result = await self.session.execute(stmt)

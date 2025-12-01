@@ -16,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent.parent))
 
 from src.infrastructure.config.settings import settings
 from src.infrastructure.database.models.base import Base
-from src.infrastructure.database.models.user import UserModel  # Register models
+from src.infrastructure.database.models.user import UserModel
+from src.infrastructure.database.models.file import FolderModel, FileModel  # Register models
+from src.infrastructure.database.models.share_link import ShareLinkModel
 # ---------------------------------------
 
 # this is the Alembic Config object, which provides

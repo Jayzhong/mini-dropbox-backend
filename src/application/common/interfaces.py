@@ -17,6 +17,9 @@ class UserRepository(Protocol):
     """
     Abstract interface for User data access.
     """
+    async def get_by_id(self, user_id: UUID) -> Optional[User]:
+        ...
+
     async def get_by_email(self, email: str) -> Optional[User]:
         ...
 
@@ -38,4 +41,7 @@ class TokenService(Protocol):
     Abstract interface for Token generation and validation.
     """
     def create_access_token(self, data: Dict[str, Any]) -> str:
+        ...
+
+    def decode_access_token(self, token: str) -> Dict[str, Any]:
         ...
